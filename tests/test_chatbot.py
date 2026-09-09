@@ -1,34 +1,46 @@
 import unittest
-from unittest.mock import MagicMock, patch
-from chatbot import SupermercadoBot
+from unittest.mock import patch, MagicMock
 
-class TestSupermercadoBot(unittest.TestCase):
+import app as app_module
+
+
+class TestGerarResposta(unittest.TestCase):
+    """Testa a função gerar_resposta() sem chamar a API real do Gemini."""
+
+    @patch("app.client.models.generate_content")
+    def test_gerar_resposta_retorna_texto_da_api(self, mock_generate_content):
+        resposta_falsa = MagicMock()
+        resposta_falsa.text = "Sim, temos arroz em promoção esta semana!"
+        mock_generate_content.return_value = resposta_falsa
+
+        resultado = app_module.gerar_resposta("Vocês têm arroz?")
+
+        self.assertEqual(resultado, "Sim, temos arroz em promoção esta semana!")
+        mock_generate_content.assert_called_once()
+
+    def test_gerar_resposta_mensagem_vazia(self):
+        resultado = app_module.gerar_resposta("")
+        self.assertIn("não entendi", resultado.lower())
+
+
+class TestRotaChat(unittest.TestCase):
+    """Testa a rota /chat usando o test client do Flask."""
+
     def setUp(self):
-        self.bot = SupermercadoBot()
+        app_module.app.testing = True
+        self.client = app_module.app.test_client()
 
-    def test_mensagem_vazia(self):
-        """Teste 1: Validação de entrada sem acionar a API externa."""
-        resposta = self.bot.processar_mensagem("   ")
-        self.assertEqual(resposta, "Por favor, digite uma pergunta válida.")
+    @patch("app.gerar_resposta")
+    def test_rota_chat_retorna_json_com_resposta(self, mock_gerar_resposta):
+        mock_gerar_resposta.return_value = "Olá! Como posso ajudar?"
 
-    @patch("chatbot.genai.Client")
-    def test_resposta_gemini_com_mock(self, mock_client_class):
-        """Teste 2: Simula resposta da API do Gemini sem gastar cotas ou depender de internet."""
-        # Cria a resposta falsa simulada
-        mock_response = MagicMock()
-        mock_response.text = "O quilo do feijão custa R$ 8,50."
+        resposta = self.client.post("/chat", json={"mensagem": "oi"})
 
-        # Configura o client falso para devolver a resposta simulada
-        mock_instance = mock_client_class.return_value
-        mock_instance.models.generate_content.return_value = mock_response
+        self.assertEqual(resposta.status_code, 200)
+        dados = resposta.get_json()
+        self.assertIn("resposta", dados)
+        self.assertEqual(dados["resposta"], "Olá! Como posso ajudar?")
 
-        # Atribui o client falso ao bot
-        self.bot.client = mock_instance
-
-        resultado = self.bot.processar_mensagem("Qual o valor do feijão?")
-
-        self.assertIn("R$ 8,50", resultado)
-        mock_instance.models.generate_content.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()
